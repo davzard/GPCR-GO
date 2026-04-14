@@ -95,6 +95,12 @@ def run_model_DBLP(args):
     }
     append_json_line(log_file_path, start_rec)
 
+
+    # 是否使用结构相似性边
+    use_struct_sim = False
+    # 找到结构相似性边的关系ID
+    struct_sim_rid = 2
+
     feats_type = args.feats_type
     features_list, adjM, dl = load_data(args.dataset)
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -151,8 +157,11 @@ def run_model_DBLP(args):
 
     import scipy.sparse as sp
 
-    # 从 dl.links['data'] 里挑选要用的关系矩阵，排除结构相似性边（关系类型 2）
-    selected_mats = [mat for k, mat in dl.links['data'].items() if k != 2]
+    # 从 dl.links['data'] 里挑选要用的关系矩阵；当 use_struct_sim=False 时去掉结构相似性那一类
+    if not use_struct_sim:
+        selected_mats = [mat for k, mat in dl.links['data'].items() if k != struct_sim_rid]
+    else:
+        selected_mats = [mat for _, mat in dl.links['data'].items()]
 
     # 把选中的各类边矩阵相加得到邻接
     if len(selected_mats) == 0:
