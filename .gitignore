@@ -1,1 +1,8 @@
-data/reviewed5/*.rar
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+*.out
+methods/model/checkpoint/
+methods/model/training_logs*.jsonl
+data/reviewed6/
