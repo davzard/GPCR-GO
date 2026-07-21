@@ -26,8 +26,11 @@ class data_loader:
         self.splited = False
         self.nodes = self.load_nodes()
         self.links = self.load_links('link.dat')
+        val_path = os.path.join(self.path, 'link.dat.val')
+        self.links_val = self.load_links('link.dat.val') if os.path.isfile(val_path) else None
         self.links_test = self.load_links('link.dat.test')
         self.test_types = list(self.links_test['data'].keys()) if edge_types == [] else edge_types
+        self.validation_source = 'link.dat.val' if self.links_val is not None else 'random_train_split'
         self.types = self.load_types('node.dat')
         self.train_pos, self.valid_pos = self.get_train_valid_pos()
         self.train_neg, self.valid_neg = self.get_train_neg(), self.get_valid_neg()
@@ -39,34 +42,53 @@ class data_loader:
         if self.splited:
             return self.train_pos, self.valid_pos
         else:
-            edge_types = self.links['data'].keys()
+            if self.links_val is not None:
+                train_pos, valid_pos = dict(), dict()
+                for r_id in self.test_types:
+                    if r_id not in self.links['data']:
+                        raise ValueError(f'Relation {r_id} is missing from link.dat in {self.path}')
+                    if r_id not in self.links_val['data']:
+                        raise ValueError(f'Relation {r_id} is missing from link.dat.val in {self.path}')
+
+                    train_row, train_col = self.links['data'][r_id].nonzero()
+                    valid_row, valid_col = self.links_val['data'][r_id].nonzero()
+                    train_pos[r_id] = [train_row.tolist(), train_col.tolist()]
+                    valid_pos[r_id] = [valid_row.tolist(), valid_col.tolist()]
+
+                self.splited = True
+                return train_pos, valid_pos
+
+
+
+
+            edge_types = self.test_types
             train_pos, valid_pos = dict(), dict()
             for r_id in edge_types:
                 train_pos[r_id] = [[], []]
                 valid_pos[r_id] = [[], []]
                 row, col = self.links['data'][r_id].nonzero()
-                # weight=self.links['data'][r_id].data
-                # print('self.links',type(self.links['data'][r_id]))
-                # print('self.links',self.links['data'][r_id].data)
-                # print('self.links',col)
-                # exit()
+
+
+
+
+
                 last_h_id = -1
                 for (h_id, t_id) in zip(row, col):
                     if h_id != last_h_id:
                         train_pos[r_id][0].append(h_id)
                         train_pos[r_id][1].append(t_id)
-                        # train_pos[r_id][2].append(value)
+
                         last_h_id = h_id
 
                     else:
                         if random.random() < train_ratio:
                             train_pos[r_id][0].append(h_id)
                             train_pos[r_id][1].append(t_id)
-                            # train_pos[r_id][2].append(value)
+
                         else:
                             valid_pos[r_id][0].append(h_id)
                             valid_pos[r_id][1].append(t_id)
-                            # valid_pos[r_id][2].append(value)
+
                             self.links['data'][r_id][h_id, t_id] = 0
                             self.links['count'][r_id] -= 1
                             self.links['total'] -= 1
@@ -169,9 +191,9 @@ class data_loader:
         if len(meta) == 0:
             meta_dict[now[0]].append(now)
             return
-        # th_mat = self.links['data'][meta[0]] if meta[0] >= 0 else self.links['data_trans'][-meta[0] - 1]
+
         th_node = now[-1]
-        for col in self.re_cache[meta[0]][th_node]:  # th_mat[th_node].nonzero()[1]:
+        for col in self.re_cache[meta[0]][th_node]:
             self.dfs(now + [col], meta[1:], meta_dict)
 
     def get_full_meta_path(self, meta=[], symmetric=False):
@@ -240,7 +262,7 @@ class data_loader:
 
 
     @staticmethod
-    def evaluate(edge_list, confidence, labels):
+    def evaluate(edge_list, confidence, labels, ic_vec=None):
         """
         :param edge_list: shape(2, edge_num)
         :param confidence: shape(edge_num,)
@@ -253,7 +275,7 @@ class data_loader:
         roc_auc = roc_auc_score(labels, confidence)
         print("roc_auc:", roc_auc)
         p, r, t = precision_recall_curve(labels, confidence)
-        # fmax, aupr=main(labels, confidence)
+
         mrr_list, cur_mrr = [], 0
         t_dict, labels_dict, conf_dict = defaultdict(list), defaultdict(list), defaultdict(list)
         for i, h_id in enumerate(edge_list[0]):
@@ -271,8 +293,8 @@ class data_loader:
             cur_mrr = 1 / (1 + pos_min_rank)
             mrr_list.append(cur_mrr)
         mrr = np.mean(mrr_list)
-        return evaluate_all(labels, confidence)
-        # return {'roc_auc': roc_auc, 'MRR': mrr, 'aupr': auc(r, p)}
+        return evaluate_all(labels, confidence, ic_vec=ic_vec)
+
 
     def get_node_type(self, node_id):
         for i in range(len(self.nodes['shift'])):
@@ -317,37 +339,37 @@ class data_loader:
                 types['total'] += 1
         types['types'] = list(set(types['types']))
         return types
-    # 原版，只取与正样本数量相同的负样本
-    # def get_train_neg(self, edge_types=[]):
-    #     random.seed(1)
-    #     edge_types = self.test_types if edge_types == [] else edge_types
-    #     train_neg = dict()
-    #     for r_id in edge_types:
-    #         h_type, t_type = self.links['meta'][r_id]
-    #         t_range = (self.nodes['shift'][t_type], self.nodes['shift'][t_type] + self.nodes['count'][t_type])
-    #         '''get neg_neigh'''
-    #         train_neg[r_id] = [[], []]
-    #         for h_id in self.train_pos[r_id][0]:
-    #             train_neg[r_id][0].append(h_id)
-    #             neg_t = random.randrange(t_range[0], t_range[1])
-    #             train_neg[r_id][1].append(neg_t)
-    #     return train_neg
-    #
-    # def get_valid_neg(self, edge_types=[]):
-    #     random.seed(1)
-    #     edge_types = self.test_types if edge_types == [] else edge_types
-    #     valid_neg = dict()
-    #     for r_id in edge_types:
-    #         h_type, t_type = self.links['meta'][r_id]
-    #         t_range = (self.nodes['shift'][t_type], self.nodes['shift'][t_type] + self.nodes['count'][t_type])
-    #         '''get neg_neigh'''
-    #         valid_neg[r_id] = [[], []]
-    #         for h_id in self.valid_pos[r_id][0]:
-    #             valid_neg[r_id][0].append(h_id)
-    #             neg_t = random.randrange(t_range[0], t_range[1])
-    #             valid_neg[r_id][1].append(neg_t)
-    #     return valid_neg
-    # 替换 get_train_neg 函数内容
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     def get_train_neg(self, edge_types=[]):
         edge_types = self.test_types if edge_types == [] else edge_types
         train_neg = dict()
@@ -355,7 +377,7 @@ class data_loader:
             h_type, t_type = self.links['meta'][r_id]
             head_range = range(self.nodes['shift'][h_type], self.nodes['shift'][h_type] + self.nodes['count'][h_type])
             tail_range = range(self.nodes['shift'][t_type], self.nodes['shift'][t_type] + self.nodes['count'][t_type])
-            # 获取正样本集合
+
             pos_set = set(zip(self.train_pos[r_id][0], self.train_pos[r_id][1]))
             train_neg[r_id] = [[], []]
             for h in head_range:
@@ -365,7 +387,7 @@ class data_loader:
                         train_neg[r_id][1].append(t)
         return train_neg
 
-    # 替换 get_valid_neg 函数内容
+
     def get_valid_neg(self, edge_types=[]):
         edge_types = self.test_types if edge_types == [] else edge_types
         valid_neg = dict()
@@ -373,7 +395,7 @@ class data_loader:
             h_type, t_type = self.links['meta'][r_id]
             head_range = range(self.nodes['shift'][h_type], self.nodes['shift'][h_type] + self.nodes['count'][h_type])
             tail_range = range(self.nodes['shift'][t_type], self.nodes['shift'][t_type] + self.nodes['count'][t_type])
-            # 获取正样本集合
+
             pos_set = set(zip(self.valid_pos[r_id][0], self.valid_pos[r_id][1]))
             valid_neg[r_id] = [[], []]
             for h in head_range:
@@ -398,14 +420,14 @@ class data_loader:
             pos_links += self.links_test['data'][r_id] + self.links_test['data'][r_id].T
         for r_id in self.valid_pos.keys():
             values = [1] * len(self.valid_pos[r_id][0])
-            # values = self.valid_pos[r_id][2]
+
             valid_of_rel = sp.coo_matrix((values, self.valid_pos[r_id]), shape=pos_links.shape)
-            # valid_of_rel = sp.coo_matrix((values, [self.valid_pos[r_id][0],self.valid_pos[r_id][1]]), shape=pos_links.shape)
+
             pos_links += valid_of_rel
 
-        # print('pos_links',pos_links.shape)
-        # exit()
-        # pos_links[pos_links<0]=0
+
+
+
         r_double_neighs = np.dot(pos_links, pos_links)
         data = r_double_neighs.data
         data[:] = 1
@@ -430,9 +452,9 @@ class data_loader:
             h_type, t_type = self.links_test['meta'][r_id]
             r_id_index = np.where((row >= relation_range[h_type]) & (row < relation_range[h_type + 1])
                                   & (col >= relation_range[t_type]) & (col < relation_range[t_type + 1]))[0]
-            # r_num = np.zeros((3, 3))
-            # for h_id, t_id in zip(row, col):
-            #     r_num[self.get_node_type(h_id)][self.get_node_type(t_id)] += 1
+
+
+
             r_row, r_col = row[r_id_index], col[r_id_index]
             for h_id, t_id in zip(r_row, r_col):
                 neg_neigh[r_id][h_id].append(t_id)
@@ -475,12 +497,12 @@ class data_loader:
             pos_links += self.links_test['data'][r_id] + self.links_test['data'][r_id].T
         for r_id in self.valid_pos.keys():
             values = [1] * len(self.valid_pos[r_id][0])
-            # values = self.valid_pos[r_id][2]
+
             valid_of_rel = sp.coo_matrix((values, self.valid_pos[r_id]), shape=pos_links.shape)
-            # valid_of_rel = sp.coo_matrix((values, [self.valid_pos[r_id][0],self.valid_pos[r_id][1]]), shape=pos_links.shape)
+
             pos_links += valid_of_rel
 
-        # pos_links[pos_links<0]=0
+
         row, col = pos_links.nonzero()
         for h_id, t_id in zip(row, col):
             all_had_neigh[h_id].append(t_id)
@@ -604,7 +626,7 @@ class data_loader:
             for line in f:
                 th = line.split('\t')
                 if len(th) == 4:
-                    # Then this line of node has attribute
+
                     node_id, node_name, node_type, node_attr = th
                     node_id = int(node_id)
                     node_type = int(node_type)
@@ -613,7 +635,7 @@ class data_loader:
                     nodes['attr'][node_id] = node_attr
                     nodes['total'] += 1
                 elif len(th) == 3:
-                    # Then this line of node doesn't have attribute
+
                     node_id, node_name, node_type = th
                     node_id = int(node_id)
                     node_type = int(node_type)
