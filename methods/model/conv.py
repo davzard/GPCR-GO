@@ -158,36 +158,3 @@ class myGATConv(nn.Module):
                 rst = self.activation(rst)
 
             return rst, graph.edata.pop('a').detach()
-
-class NeighborRoutingConv(nn.Module):
-    def __init__(self, in_dim, out_dim, num_factors, dropout=0.0, negative_slope=0.2):
-        super(NeighborRoutingConv, self).__init__()
-        self.K = num_factors
-        self.d_k = out_dim // num_factors
-        self.linear = nn.Linear(in_dim, out_dim, bias=False)
-        self.attn = nn.Parameter(torch.Tensor(self.K, self.d_k))
-        self.leaky_relu = nn.LeakyReLU(negative_slope)
-        self.dropout = nn.Dropout(dropout)
-        nn.init.xavier_normal_(self.attn)
-    def forward(self, g, h):
-        Wh = self.linear(h)
-        Wh = Wh.view(-1, self.K, self.d_k)
-        with g.local_scope():
-            g.ndata['h'] = Wh
-            out_list = []
-            for k in range(self.K):
-                g.ndata['h_k'] = Wh[:, k, :]
-                g.ndata['a_l'] = (Wh[:, k, :] * self.attn[k]).sum(dim=1, keepdim=True)
-                g.apply_edges(lambda edges: {
-                    'e': self.leaky_relu(edges.src['a_l'] + edges.dst['a_l'])
-                })
-                g.edata['alpha'] = dgl.nn.functional.edge_softmax(g, g.edata['e'])
-                g.update_all(
-                    message_func=dgl.function.u_mul_e('h_k', 'alpha', 'm'),
-                    reduce_func=dgl.function.sum('m', 'h_agg')
-                )
-                h_new = g.ndata['h_agg']
-                h_new = self.dropout(h_new)
-                out_list.append(h_new.unsqueeze(1))
-            h_out = torch.cat(out_list, dim=1)
-            return h_out

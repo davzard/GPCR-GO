@@ -175,17 +175,6 @@ def inter_factor_space_separation(factor_tensor):
     )
     return -squared_distances[pair_mask].mean()
 
-def cosine_similarity_matrix(feat):
-
-    normed = feat / (feat.norm(dim=1, keepdim=True) + 1e-8)
-    return normed @ normed.t()
-
-def inter_node_similarity_loss(H, X):
-
-    S_H = cosine_similarity_matrix(H)
-    S_X = cosine_similarity_matrix(X)
-    return ((S_H - S_X) ** 2).mean()
-
 def run_model_DBLP(args):
     if not hasattr(args, 'seed'):
         args.seed = 42
@@ -237,7 +226,7 @@ def run_model_DBLP(args):
 
 
     feats_type = args.feats_type
-    features_list, adjM, dl = load_data(args.dataset)
+    features_list, _, dl = load_data(args.dataset)
     print(f"validation_source={dl.validation_source}")
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     features_list = [mat2tensor(features).to(device) for features in features_list]
@@ -344,11 +333,9 @@ def run_model_DBLP(args):
         raise FileNotFoundError(f"Fixed IC file not found: {ic_path}")
     ic_vec = load_ic_vector(ic_path, range(go_start_idx, go_end_idx))
 
-    res_2hop = defaultdict(float)
     res_random = defaultdict(float)
     res_validation = defaultdict(float)
     total = len(dl.links_test['data'])
-    first_flag = True
     run_id = effective_run_id
     model_root = os.path.join(args.checkpoint_dir, run_id)
     os.makedirs(model_root, exist_ok=True)
@@ -522,8 +509,6 @@ def run_model_DBLP(args):
 
         net.load_state_dict(torch.load(best_model_path, map_location=device))
         net.eval()
-        net.load_state_dict(torch.load(best_model_path, map_location=device))
-        net.eval()
 
         def evaluate_full_go(head_arr, tail_arr):
             head_arr = np.array(head_arr)
@@ -568,8 +553,6 @@ def run_model_DBLP(args):
             for k, v in test_res.items():
                 res_random[k] += v
 
-    for k in res_2hop:
-        res_2hop[k] /= total
     for k in res_validation:
         res_validation[k] /= total
     for k in res_random:
